@@ -49,8 +49,9 @@ Support captures that involve multiple private networks (e.g. 192.168.x.x and 10
 
 ------------- TEMPORARY ----------------
 In order to send a single UDP packet hardcoded from "10.0.1.6" to "10.0.0.6" run two instances of playcap.py:
-# sudo python ./playcap.py --tun-addr 10.0.0.5
-# sudo python ./playcap.py --tun-addr=10.0.1.5 -w
+# sudo ./playpcap.py p 10.0.0.5 --role server
+and then
+# sudo ./playpcap.py p 10.0.1.5
 
 The first reads from the a tunnel and the second writes.
 
