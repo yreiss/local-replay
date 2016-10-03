@@ -51,6 +51,12 @@ class topologizer:
         remove_from_set(self.unknown_lan, other_ip)    
         self.remove_none()
 
+    def set_gw_mac(self, mac):
+        if self.gw_mac and self.gw_mac != mac:
+            print "gw mac already set to ", self.gw_mac, " not changing to ", mac, " please check why this is happening"
+        else:
+            self.gw_mac = mac
+
     def analyze(self):
         pkts = rdpcap(self.pcap)    
 
@@ -59,11 +65,11 @@ class topologizer:
 
                 if is_private(pkt[IP].src) and not is_private(pkt[IP].dst):
                     self.add_lan_wan_other(lan_ip=pkt[IP].src, wan_ip=pkt[IP].dst)
-                    self.gw_mac=pkt[Ether].dst
+                    self.set_gw_mac(pkt[Ether].dst)
 
                 elif is_private(pkt[IP].dst) and not is_private(pkt[IP].src):
                     self.add_lan_wan_other(lan_ip=pkt[IP].dst, wan_ip=pkt[IP].src)
-                    self.gw_mac=pkt[Ether].src
+                    self.set_gw_mac(pkt[Ether].src)
                     
                 elif is_private(pkt[IP].src) and is_private(pkt[IP].dst):
                     if self.gw_mac and pkt[Ether].src != 'ff:ff:ff:ff:ff:ff' and pkt[Ether].dst != 'ff:ff:ff:ff:ff:ff':
@@ -80,13 +86,13 @@ class topologizer:
                     print "both ", pkt[IP].src, " and ", pkt[IP].dst, " are public. Where did this pcap come from?"
 
             
-            # add mac addresses and it associations with IP address
-            if pkt[Ether].src not in self.macs:
-                self.macs[pkt[Ether].src] = Set()
-            if pkt[Ether].dst not in self.macs:
-                self.macs[pkt[Ether].dst] = Set()            
-            self.macs[pkt[Ether].src].add(pkt[IP].src)
-            self.macs[pkt[Ether].dst].add(pkt[IP].dst)
+                # add mac addresses and it associations with IP address
+                if pkt[Ether].src not in self.macs:
+                    self.macs[pkt[Ether].src] = Set()
+                if pkt[Ether].dst not in self.macs:
+                    self.macs[pkt[Ether].dst] = Set()            
+                self.macs[pkt[Ether].src].add(pkt[IP].src)
+                self.macs[pkt[Ether].dst].add(pkt[IP].dst)
 
         # if the gw mac was not found by now, try to guess by the most used mac address
         if not self.gw_mac:
