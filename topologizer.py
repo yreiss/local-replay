@@ -14,6 +14,16 @@ def is_private(ipv4_addr):
         return True
     return False
 
+
+#  this is of course not true, but we are only providing some heuristics as we don't have the subnet configuration.
+# Maybe we'll think of a way to improve this later by providing better heuristics based on the collection of packets.
+def is_broadcast_ip(ipv4_addr):
+    return ipv4_addr.split('.')[3] == '255'
+
+def is_multicast_ip(ipv4_addr):
+    high = int(ipv4_addr.split('.')[0])
+    return high >= 224 and high <= 239
+
 def remove_from_set(_set, entry):
     try:
         _set.remove(entry)
@@ -57,13 +67,18 @@ class topologizer:
         else:
             self.gw_mac = mac
 
+    
+
     def analyze(self):
         pkts = rdpcap(self.pcap)    
 
         for pkt in pkts:
             if IP in pkt and Ether in pkt:
 
-                if is_private(pkt[IP].src) and not is_private(pkt[IP].dst):
+                if is_broadcast_ip(pkt[IP].src) or is_broadcast_ip(pkt[IP].dst) or is_multicast_ip(pkt[IP].src) or is_multicast_ip(pkt[IP].dst):
+                    pass
+
+                elif is_private(pkt[IP].src) and not is_private(pkt[IP].dst):
                     self.add_lan_wan_other(lan_ip=pkt[IP].src, wan_ip=pkt[IP].dst)
                     self.set_gw_mac(pkt[Ether].dst)
 
@@ -78,9 +93,10 @@ class topologizer:
                         elif pkt[Ether].dst == self.gw_mac:
                             self.add_lan_wan_other(lan_ip=pkt[IP].src, other_ip=pkt[IP].dst)
                         else:
-                            print "strange... ", pkt[IP].src, " and ", pkt[IP].dst, " don't use mac ", gw_mac
+                            print "strange... ", pkt[IP].src, " and ", pkt[IP].dst, " don't use mac ", self.gw_mac
                     else:
-                        check_add_to_unknown([pkt[IP].src, pkt[IP].dst])
+                        pass
+                        #check_add_to_unknown([pkt[IP].src, pkt[IP].dst])
 
                 else:
                     print "both ", pkt[IP].src, " and ", pkt[IP].dst, " are public. Where did this pcap come from?"
