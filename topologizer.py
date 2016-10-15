@@ -63,22 +63,18 @@ def is_multicast_ip(ipv4_addr):
     high = int(ipv4_addr.split('.')[0])
     return high >= 224 and high <= 239
 
-def remove_from_set(_set, entry):
-    try:
-        _set.remove(entry)
-    except KeyError:
-        pass
-
 class topologizer:
     
     def __init__(self, pcap, gw=None, subnet=None):
 
         self.pcap = pcap
 
-        self.lan = Set()
+        self.suspected_lan = Set()  # a host is only suspected as belonging to the LAN if it sends packets out or to the broadcast.
+                                    # this is because sometimes hosts send from the wrong IP (e.g. mobile devices after moving from provider network to wifi).
+        self.confirmed_lan = Set()  # a host is confirmed to be in the LAN if it received traffic from the GW (i.e. from the gw's mac address)
         self.wan = Set()
         self.other_lan = Set()
-        self.unknown_lan = Set()
+        self.second_path = []
         self.gw = gw
         self.subnet = subnet
 
@@ -87,20 +83,18 @@ class topologizer:
         self.macs={}
 
 
-    def remove_none(self):
-        for s in [self.lan, self.wan, self.other_lan]:
-            try:
-                s.remove(None)
-            except KeyError:
-                pass
 
-    def add_lan_wan_other(self, lan_ip=None, wan_ip=None, other_ip=None):
-        self.lan.add(lan_ip)
-        self.wan.add(wan_ip)
-        self.other_lan.add(other_ip)
-        remove_from_set(self.unknown_lan, lan_ip)
-        remove_from_set(self.unknown_lan, other_ip)    
-        self.remove_none()
+    def add_lan_wan_other(self, suspected_lan_ip=None, wan_ip=None, other_ip=None, confirmed_lan_ip=None):
+        if suspected_lan_ip and suspected_lan_ip not in self.confirmed_lan:
+            self.suspected_lan.add(suspected_lan_ip)
+        if wan_ip:
+            self.wan.add(wan_ip)
+        if other_ip and (self.gw != other_ip):
+            self.other_lan.add(other_ip)
+        if confirmed_lan_ip:
+            self.confirmed_lan.add(confirmed_lan_ip)
+            if confirmed_lan_ip in self.suspected_lan:
+                self.suspected_lan.remove(confirmed_lan_ip)
 
     def set_gw_mac(self, mac):
         if self.gw_mac and self.gw_mac != mac:
@@ -109,59 +103,84 @@ class topologizer:
             self.gw_mac = mac
 
 
-    def decide_gw_and_subnet(self):
+    def determine_gw_and_subnet(self):
         pass
-        
 
-    def analyze(self):
-        pkts = rdpcap(self.pcap)    
+    def crown_gw(self, gw):
+        print "crowning .... "
+        if not self.gw:
+            self.gw = gw
+            if gw in self.other_lan:
+                self.other_lan.remove(gw)
+        elif self.gw != gw:
+            print "warning - gw already set to ", self.gw, " but a new crowning requested to ", gw, " - ignoring second"
+
+
+    def run(self):
+        pkts = rdpcap(self.pcap)  
+        self.analyze_packets(pkts)
+        self.analyze_packets(self.second_path, True)
+
+        self.determine_gw_and_subnet()
+        
+        return self.confirmed_lan, self.suspected_lan, self.wan, self.other_lan, self.gw, self.subnet
+
+    def analyze_packets(self, pkts, second_run=False):
 
         for pkt in pkts:
             if IP in pkt and Ether in pkt:
 
-                if is_private(pkt[IP].src) and is_public(pkt[IP].dst):
-                    self.add_lan_wan_other(lan_ip=pkt[IP].src, wan_ip=pkt[IP].dst)
+                # broadcast
+                if pkt[Ether].dst == "ff:ff:ff:ff:ff:ff":
+                    if self.gw_mac:
+                        if self.gw_mac == pkt[Ether].src:
+                            self.crown_gw(pkt[IP].src)
+                        elif is_private(pkt[IP].src):
+                            self.add_lan_wan_other(suspected_lan_ip=pkt[IP].src)
+                    else:
+                        self.second_path.append(pkt)
+
+                # LAN to WAN
+                elif is_private(pkt[IP].src) and is_public(pkt[IP].dst):
+                    self.add_lan_wan_other(suspected_lan_ip=pkt[IP].src, wan_ip=pkt[IP].dst)
                     self.set_gw_mac(pkt[Ether].dst)
 
+                # WAN to LAN
                 elif is_private(pkt[IP].dst) and is_public(pkt[IP].src):
-                    self.add_lan_wan_other(lan_ip=pkt[IP].dst, wan_ip=pkt[IP].src)
+                    self.add_lan_wan_other(confirmed_lan_ip=pkt[IP].dst, wan_ip=pkt[IP].src)
                     self.set_gw_mac(pkt[Ether].src)
-                    
+
+                # LAN to LAN - could be same subnet or between subnets
                 elif is_private(pkt[IP].src) and is_private(pkt[IP].dst):
-                    if self.gw_mac and pkt[Ether].src != 'ff:ff:ff:ff:ff:ff' and pkt[Ether].dst != 'ff:ff:ff:ff:ff:ff':
+                    if self.gw_mac:
                         if pkt[Ether].src == self.gw_mac:
-                            self.add_lan_wan_other(lan_ip=pkt[IP].dst, other_ip=pkt[IP].src)
+                            self.add_lan_wan_other(confirmed_lan_ip=pkt[IP].dst, other_ip=pkt[IP].src)
                         elif pkt[Ether].dst == self.gw_mac:
-                            self.add_lan_wan_other(lan_ip=pkt[IP].src, other_ip=pkt[IP].dst)
+                            self.add_lan_wan_other(suspected_lan_ip=pkt[IP].src, other_ip=pkt[IP].dst)
                         else:
                             print "strange... ", pkt[IP].src, " and ", pkt[IP].dst, " don't use mac ", self.gw_mac
                     else:
-                        pass
-                        #check_add_to_unknown([pkt[IP].src, pkt[IP].dst])
-
-                else:
-                    pass
-                    #print "both ", pkt[IP].src, " and ", pkt[IP].dst, " are public. Where did this pcap come from?"
-
-            
-                # add mac addresses and it associations with IP address
-                if pkt[Ether].src not in self.macs:
-                    self.macs[pkt[Ether].src] = Set()
-                if pkt[Ether].dst not in self.macs:
-                    self.macs[pkt[Ether].dst] = Set()            
-                self.macs[pkt[Ether].src].add(pkt[IP].src)
-                self.macs[pkt[Ether].dst].add(pkt[IP].dst)
-
-        # if the gw mac was not found by now, try to guess by the most used mac address
-        if not self.gw_mac:
-            m = max(self.macs, key=lambda x: len(self.macs[x]))
-            if m > 1:
-                self.gw_mac = m
+                        self.second_path.append(pkt)
 
 
-        self.decide_gw_and_subnet()
-        
-        return self.lan, self.wan, self.other_lan, self.gw, self.subnet
+                if not second_run:
+                    # add mac addresses and it associations with IP address
+                    if pkt[Ether].src not in self.macs:
+                        self.macs[pkt[Ether].src] = Set()
+                        if pkt[Ether].dst not in self.macs:
+                            self.macs[pkt[Ether].dst] = Set()            
+                            self.macs[pkt[Ether].src].add(pkt[IP].src)
+                            self.macs[pkt[Ether].dst].add(pkt[IP].dst)
+
+        if not second_run:
+            # if the gw mac was not found by now, try to guess by the most used mac address
+            if not self.gw_mac:
+                m = max(self.macs, key=lambda x: len(self.macs[x]))
+                if m > 1:
+                    self.gw_mac = m
+
+
+
 
 
 def parse_args():
@@ -176,10 +195,13 @@ def main():
 
     args = parse_args()
     top = topologizer(args.pcap, args.gw, args.subnet)
-    lan, wan, other, gw, subnet = top.analyze()
+    confirmed_lan, suspected_lan, wan, other, gw, subnet = top.run()
 
-    print "lan", 
-    print lan
+    print "confirmed lan", 
+    print confirmed_lan
+    print
+    print "suspected lan", 
+    print suspected_lan
     print
     print "wan", 
     print wan
