@@ -102,9 +102,80 @@ class topologizer:
         else:
             self.gw_mac = mac
 
+    def determine_subnet(self):
+        subnets=Set()
+        for ip in self.confirmed_lan:
+            ad = [int(x) for x in ip.split('.')]
+            if ad[0] == '10':
+                subnets.add((10))
+            elif ad[0] == 192 and ad[1] == 168:
+                subnets.add((192,168))
+            elif ad[0] == 172 and (ad[1] >= 16 and ad[1] <= 31):
+                subnets.add((172, ad[1]))
+
+        if len(subnets) == 0:
+            print "no confirmed lan ip addresses. cannot find subnet"
+            print self.confirmed_lan
+            exit (1)
+        elif len(subnets) > 1:
+            print "more than one confirmed subnet type. cannot find subnet."
+            print subnets
+            exit (1)
+
+        #  if we got here we have a winning 'subnet class'. Not yet the final subnet.
+        for subnet in subnets:
+            pass
+
+        for ip in self.suspected_lan:
+            ad = [int(x) for x in ip.split('.')]
+            if subnet[0] == ad[0] and (len(subnet) == 1 or subnet[1] == ad[1]):
+                self.add_lan_wan_other(confirmed_lan_ip = ip)
+
+
+        # Now let's try and guess the mask. Basically there is no way to know for sure. So what we're doing is assuming that it's a 24 bit network.
+        # Then we go over all of the ip addresses in the confirmed lan. If we see indication that it's less than 24 bits, we reduce the bits.
+        # We do assume that there is no <16 bits subnet. So we're only checking the third byte of the IPv4.
+
+        bits=24
+        started=False
+        for ip in self.confirmed_lan:
+            ad = [int(x) for x in ip.split('.')]
+            self.add_lan_wan_other(confirmed_lan_ip = ip)
+            if not started:
+                initial_ip=ad
+                started=True
+            debt=0
+            for i in [2**x for x in range(0, bits-16-1)]:
+                if (initial_ip[2] & i) != (ad[2]&i):
+                    bits = bits - 1 - debt
+                    debt=0
+                else:
+                    debt += 1
+
+        mask=0xffffffff - (2**(32-bits)-1)
+        subnet_address=(initial_ip[0]<<24) + (initial_ip[1]<<16) + (initial_ip[2]<<8) + initial_ip[3]
+        subnet_address= subnet_address & mask
+     
+        s=subnet_address
+        self.subnet=str(s>>24) + '.' + str((s & (0xff0000))>>16) + '.' + str((s & (0xff00))>>8) + '.' + str(s & 0xff) + '/' + str(bits)
+           
 
     def determine_gw_and_subnet(self):
-        pass
+        if not self.subnet:
+            self.determine_subnet()
+        
+        if not self.gw:
+            sn = self.subnet.split('/')
+            bits=int(sn[1])
+            third_byte_mask = 0xff - (2**(24-bits)-1)
+            snaddr=[int(x) for x in sn[0].split('.')]
+            for ip in self.other_lan:
+                ad = [int(x) for x in ip.split('.')]
+                if (ad[0] == snaddr[0]) and (ad[1] == snaddr[1]) and ((ad[2] & third_byte_mask) == snaddr[2]):
+                    self.crown_gw(ip)
+                    break
+
+        
 
     def crown_gw(self, gw):
         print "crowning .... "
@@ -187,7 +258,7 @@ def parse_args():
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("pcap", help="pcap to analyze")
     argument_parser.add_argument("--gw", help="specify gw if known")
-    argument_parser.add_argument("--subnet", help="specify subnet if known")    
+    argument_parser.add_argument("--subnet", help="specify subnet if known. Subnet should be specified in the CIDR form (x.x.x.x/n, e.g. 192.168.133.0/22)")    
 
     return argument_parser.parse_args()
 
