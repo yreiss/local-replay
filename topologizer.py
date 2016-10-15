@@ -106,7 +106,7 @@ class topologizer:
         subnets=Set()
         for ip in self.confirmed_lan:
             ad = [int(x) for x in ip.split('.')]
-            if ad[0] == '10':
+            if ad[0] == 10:
                 subnets.add((10))
             elif ad[0] == 192 and ad[1] == 168:
                 subnets.add((192,168))
