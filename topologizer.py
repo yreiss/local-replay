@@ -102,12 +102,12 @@ class topologizer:
         else:
             self.gw_mac = mac
 
-    def determine_subnet(self):
+    def get_single_subnet_class(self):
         subnets=Set()
         for ip in self.confirmed_lan:
             ad = [int(x) for x in ip.split('.')]
             if ad[0] == 10:
-                subnets.add((10))
+                subnets.add((10,))
             elif ad[0] == 192 and ad[1] == 168:
                 subnets.add((192,168))
             elif ad[0] == 172 and (ad[1] >= 16 and ad[1] <= 31):
@@ -115,14 +115,20 @@ class topologizer:
 
         if len(subnets) == 0:
             print "no confirmed lan ip addresses. cannot find subnet"
-            print self.confirmed_lan
-            exit (1)
+            raise Exception('could not find subnet')
         elif len(subnets) > 1:
             print "more than one confirmed subnet type. cannot find subnet."
-            print subnets
-            exit (1)
+            raise Exception('too many potential subnets', subnets)
+
+        return next(iter(subnets))
+
 
         #  if we got here we have a winning 'subnet class'. Not yet the final subnet.
+
+        '''
+        Not sure this is correct. E.g. if the subnet is 192.168.1.0/24 and there are packets from 192.168.4.25 
+        that did not receive an answer, not sure we want to confirm them
+
         for subnet in subnets:
             pass
 
@@ -130,20 +136,22 @@ class topologizer:
             ad = [int(x) for x in ip.split('.')]
             if subnet[0] == ad[0] and (len(subnet) == 1 or subnet[1] == ad[1]):
                 self.add_lan_wan_other(confirmed_lan_ip = ip)
+        '''
 
+    def calc_bits(self, ip_set, base_ip):
 
         # Now let's try and guess the mask. Basically there is no way to know for sure. So what we're doing is assuming that it's a 24 bit network.
         # Then we go over all of the ip addresses in the confirmed lan. If we see indication that it's less than 24 bits, we reduce the bits.
         # We do assume that there is no <16 bits subnet. So we're only checking the third byte of the IPv4.
 
+        ip_set=Set(self.confirmed_lan)
+
         bits=24
-        started=False
-        for ip in self.confirmed_lan:
+        ip=next(iter(ip_set))
+        initial_ip = [int(x) for x in ip.split('.')]
+
+        for ip in ip_set:
             ad = [int(x) for x in ip.split('.')]
-            self.add_lan_wan_other(confirmed_lan_ip = ip)
-            if not started:
-                initial_ip=ad
-                started=True
             debt=0
             for i in [2**x for x in range(0, bits-16-1)]:
                 if (initial_ip[2] & i) != (ad[2]&i):
@@ -152,19 +160,56 @@ class topologizer:
                 else:
                     debt += 1
 
-        mask=0xffffffff - (2**(32-bits)-1)
-        subnet_address=(initial_ip[0]<<24) + (initial_ip[1]<<16) + (initial_ip[2]<<8) + initial_ip[3]
-        subnet_address= subnet_address & mask
-     
-        s=subnet_address
-        self.subnet=str(s>>24) + '.' + str((s & (0xff0000))>>16) + '.' + str((s & (0xff00))>>8) + '.' + str(s & 0xff) + '/' + str(bits)
-           
+        return bits
+
+
+    def ip_in_subnet_class(self, ip, sn):
+        ip = [int(x) for x in ip.split('.')]
+        return (ip[0] == sn[0]) and ((sn[0] == 10) or (ip[1] == sn[1]))       
 
     def determine_gw_and_subnet(self):
+        # subnet not received from caller
         if not self.subnet:
-            self.determine_subnet()
+            try:
+                sn = self.get_single_subnet_class()
+            except Exception as e:
+                print e
+                raise
+
+            ip_set = Set(self.confirmed_lan)
+            if self.gw:
+                ip_set.add(self.gw)
+            base_ip = next(iter(ip_set))
+            bits = self.calc_bits(ip_set, base_ip)
+            
+            #  both subnet and gw were not given by the caller.
+            #  checking if other_lan contains something that may be the GW.
+            if not self.gw:
+                best_bits = 0
+                candidates=[]
+                for ip in self.other_lan:
+                    if self.ip_in_subnet_class(ip, sn):
+                        ip_set = Set(self.confirmed_lan)
+                        ip_set.add(ip)
+                        base_ip = next(iter(ip_set))
+                        temp_bits = self.calc_bits(ip_set, base_ip)
+                        best_bits = max(best_bits, temp_bits)
+                        if temp_bits == best_bits:
+                            candidates.append(ip)
+                if candidates and len(candidates) == 1:
+                    self.crown_gw(candidates[0])
+                    bits=best_bits
+                
+            base_ip = [int(x) for x in next(iter(self.confirmed_lan)).split('.')]
+            mask=0xffffffff - (2**(32-bits)-1)
+            subnet_address=(base_ip[0]<<24) + (base_ip[1]<<16) + (base_ip[2]<<8) + base_ip[3]
+            subnet_address= subnet_address & mask
+     
+            s=subnet_address
+            self.subnet=str(s>>24) + '.' + str((s & (0xff0000))>>16) + '.' + str((s & (0xff00))>>8) + '.' + str(s & 0xff) + '/' + str(bits)
+
         
-        if not self.gw:
+        elif not self.gw: # subnet was provided but not GW
             sn = self.subnet.split('/')
             bits=int(sn[1])
             third_byte_mask = 0xff - (2**(24-bits)-1)
