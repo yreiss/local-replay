@@ -40,6 +40,7 @@
 from scapy.all import *
 import argparse
 from sets import Set
+import lr_common
 
 def is_private(ipv4_addr):
     ad = [int(x) for x in ipv4_addr.split('.')]
@@ -52,16 +53,14 @@ def is_private(ipv4_addr):
     return False
 
 def is_public(ipv4_addr):
-    return not is_private(ipv4_addr) and not is_broadcast_ip(ipv4_addr) and not is_multicast_ip(ipv4_addr)
+    return not is_private(ipv4_addr) and not is_broadcast_ip(ipv4_addr) and not lr_common.is_multicast_ip(ipv4_addr)
 
 #  this is of course not true, but we are only providing some heuristics as we don't have the subnet configuration.
 # Maybe we'll think of a way to improve this later by providing better heuristics based on the collection of packets.
 def is_broadcast_ip(ipv4_addr):
     return ipv4_addr.split('.')[3] == '255'
 
-def is_multicast_ip(ipv4_addr):
-    high = int(ipv4_addr.split('.')[0])
-    return high >= 224 and high <= 239
+
 
 class topologizer:
     
@@ -77,6 +76,7 @@ class topologizer:
         self.second_path = []
         self.gw = gw
         self.subnet = subnet
+        self.broadcast_ip = ''
 
         self.gw_mac=''
         self.gw_ip=''
@@ -205,8 +205,9 @@ class topologizer:
             subnet_address=(base_ip[0]<<24) + (base_ip[1]<<16) + (base_ip[2]<<8) + base_ip[3]
             subnet_address= subnet_address & mask
      
-            s=subnet_address
-            self.subnet=str(s>>24) + '.' + str((s & (0xff0000))>>16) + '.' + str((s & (0xff00))>>8) + '.' + str(s & 0xff) + '/' + str(bits)
+            # s=subnet_address
+            self.subnet = lr_common.ip_itoa(subnet_address) + '/' + str(bits)
+            # self.subnet=str(s>>24) + '.' + str((s & (0xff0000))>>16) + '.' + str((s & (0xff00))>>8) + '.' + str(s & 0xff) + '/' + str(bits)
 
         
         elif not self.gw: # subnet was provided but not GW
@@ -220,7 +221,13 @@ class topologizer:
                     self.crown_gw(ip)
                     break
 
-        
+    def determine_broadcast_ip(self):
+        if self.subnet:
+            bcst = lr_common.ip_atoi(self.subnet.split('/')[0])
+            bits = int(self.subnet.split('/')[1])
+            bcst |= (2**(32-bits)-1)
+            self.broadcast_ip = lr_common.ip_itoa(bcst)
+
 
     def crown_gw(self, gw):
         print "crowning .... "
@@ -238,8 +245,11 @@ class topologizer:
         self.analyze_packets(self.second_path, True)
 
         self.determine_gw_and_subnet()
+
+        self.determine_broadcast_ip()
+
         
-        return self.confirmed_lan, self.suspected_lan, self.wan, self.other_lan, self.gw, self.subnet
+        return self.confirmed_lan, self.suspected_lan, self.wan, self.other_lan, self.gw, self.subnet, self.broadcast_ip
 
     def analyze_packets(self, pkts, second_run=False):
 
@@ -310,8 +320,8 @@ def parse_args():
 def main():
 
     args = parse_args()
-    top = topologizer(args.pcap, args.gw, args.subnet)
-    confirmed_lan, suspected_lan, wan, other, gw, subnet = top.run()
+    top = topologizer(args.pcap)  #args.gw, args.subnet)
+    confirmed_lan, suspected_lan, wan, other, gw, subnet, bcst = top.run()
 
     print "confirmed lan", 
     print confirmed_lan
@@ -330,6 +340,9 @@ def main():
     print
     print "subnet ",
     print subnet
+    print
+    print "broadcast ",
+    print bcst
 
 
     return 0
