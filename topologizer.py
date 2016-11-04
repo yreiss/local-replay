@@ -306,9 +306,6 @@ class topologizer:
                     self.gw_mac = m
 
 
-
-
-
 def parse_args():
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("pcap", help="pcap to analyze")
@@ -320,30 +317,14 @@ def parse_args():
 def main():
 
     args = parse_args()
-    top = topologizer(args.pcap)  #args.gw, args.subnet)
+    top = topologizer(args.pcap)
     confirmed_lan, suspected_lan, wan, other, gw, subnet, bcst = top.run()
-
-    print "confirmed lan", 
-    print confirmed_lan
-    print
-    print "suspected lan", 
-    print suspected_lan
-    print
-    print "wan", 
-    print wan
-    print
-    print "other", 
-    print other
-    print
-    print "gw", 
-    print gw
-    print
-    print "subnet ",
-    print subnet
-    print
-    print "broadcast ",
-    print bcst
-
+    
+    arr = ["confirmed_lan", "suspected_lan", "wan", "other", "gw", "subnet", "bcst"]
+    for e in arr:
+        print e + ": ",
+        print eval(e)
+        print
 
     return 0
 
