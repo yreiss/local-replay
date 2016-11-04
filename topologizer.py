@@ -52,14 +52,6 @@ def is_private(ipv4_addr):
         return True
     return False
 
-def is_public(ipv4_addr):
-    return not is_private(ipv4_addr) and not is_broadcast_ip(ipv4_addr) and not lr_common.is_multicast_ip(ipv4_addr)
-
-#  this is of course not true, but we are only providing some heuristics as we don't have the subnet configuration.
-# Maybe we'll think of a way to improve this later by providing better heuristics based on the collection of packets.
-def is_broadcast_ip(ipv4_addr):
-    return ipv4_addr.split('.')[3] == '255'
-
 
 
 class topologizer:
@@ -76,7 +68,6 @@ class topologizer:
         self.second_path = []
         self.gw = gw
         self.subnet = subnet
-        self.broadcast_ip = ''
 
         self.gw_mac=''
         self.gw_ip=''
@@ -162,6 +153,16 @@ class topologizer:
 
         return bits
 
+    def is_public(self, ipv4_addr):
+        return not is_private(ipv4_addr) and not self.is_broadcast_ip(ipv4_addr) and not lr_common.is_multicast_ip(ipv4_addr)
+        
+    def is_broadcast_ip(self, ipv4_addr):
+        bip = self.get_broadcast_ip()
+        if bip:
+            return ipv4_addr == "255.255.255.255" or ipv4_addr == bip
+        else:
+            # we don't know the subnet yet - just hope checking last byte is enough
+            return ipv4_addr.split('.')[3] == '255'
 
     def ip_in_subnet_class(self, ip, sn):
         ip = [int(x) for x in ip.split('.')]
@@ -221,13 +222,14 @@ class topologizer:
                     self.crown_gw(ip)
                     break
 
-    def determine_broadcast_ip(self):
+    def get_broadcast_ip(self):
         if self.subnet:
             bcst = lr_common.ip_atoi(self.subnet.split('/')[0])
             bits = int(self.subnet.split('/')[1])
             bcst |= (2**(32-bits)-1)
-            self.broadcast_ip = lr_common.ip_itoa(bcst)
-
+            return lr_common.ip_itoa(bcst)
+        else:
+            return None
 
     def crown_gw(self, gw):
         print "crowning .... "
@@ -246,10 +248,8 @@ class topologizer:
 
         self.determine_gw_and_subnet()
 
-        self.determine_broadcast_ip()
-
         
-        return self.confirmed_lan, self.suspected_lan, self.wan, self.other_lan, self.gw, self.subnet, self.broadcast_ip
+        return self.confirmed_lan, self.suspected_lan, self.wan, self.other_lan, self.gw, self.subnet
 
     def analyze_packets(self, pkts, second_run=False):
 
@@ -267,12 +267,12 @@ class topologizer:
                         self.second_path.append(pkt)
 
                 # LAN to WAN
-                elif is_private(pkt[IP].src) and is_public(pkt[IP].dst):
+                elif is_private(pkt[IP].src) and self.is_public(pkt[IP].dst):
                     self.add_lan_wan_other(suspected_lan_ip=pkt[IP].src, wan_ip=pkt[IP].dst)
                     self.set_gw_mac(pkt[Ether].dst)
 
                 # WAN to LAN
-                elif is_private(pkt[IP].dst) and is_public(pkt[IP].src):
+                elif is_private(pkt[IP].dst) and self.is_public(pkt[IP].src):
                     self.add_lan_wan_other(confirmed_lan_ip=pkt[IP].dst, wan_ip=pkt[IP].src)
                     self.set_gw_mac(pkt[Ether].src)
 
@@ -318,9 +318,9 @@ def main():
 
     args = parse_args()
     top = topologizer(args.pcap)
-    confirmed_lan, suspected_lan, wan, other, gw, subnet, bcst = top.run()
+    confirmed_lan, suspected_lan, wan, other, gw, subnet = top.run()
     
-    arr = ["confirmed_lan", "suspected_lan", "wan", "other", "gw", "subnet", "bcst"]
+    arr = ["confirmed_lan", "suspected_lan", "wan", "other", "gw", "subnet"]
     for e in arr:
         print e + ": ",
         print eval(e)

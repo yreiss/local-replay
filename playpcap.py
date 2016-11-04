@@ -82,7 +82,7 @@ def main():
     args = parse_args()
 
     top = topologizer(args.pcap)
-    confirmed_lan, suspected_lan, wan, other, gw, subnet, broadcast_ip = top.run()
+    confirmed_lan, suspected_lan, wan, other, gw, subnet =  top.run()
 
     if (not gw) or not (subnet):
         print "can't continue without gw and subnet"
@@ -109,7 +109,7 @@ def main():
         if 'IP' in pkt:
             pkt = IP(str(pkt[IP])[0:pkt[IP].len])  # get rid of Eth Layer
 
-            if pkt[IP].dst == "255.255.255.255" or pkt[IP].dst == broadcast_ip or lr_common.is_multicast_ip(pkt[IP].dst) or pkt[IP].src == gw or pkt[IP].dst == gw:
+            if top.is_broadcast_ip(pkt[IP].dst) or lr_common.is_multicast_ip(pkt[IP].dst) or pkt[IP].src == gw or pkt[IP].dst == gw:
                 continue
 
             if len(str(pkt)) > 1500:
