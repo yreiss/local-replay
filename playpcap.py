@@ -12,9 +12,7 @@ import select
 import errno
 import pytun
 from scapy.all import *
-import time
 from topologizer import topologizer
-import unshare
 import pprint
 import lr_common
 
@@ -92,19 +90,13 @@ def main():
 
             if ip_in_subnet(pkt[IP].src, subnet):
                 w = lan_tun.write(str(pkt))
-                print "wrote to lan " + str(w) + " bytes"
             else:
                 w = wan_tun.write(str(pkt))
-                print "wrote to wan " + str(w) + " bytes"
-
            
             if ip_in_subnet(pkt[IP].dst, subnet):
-                print "reading from lan ..."
                 r = lan_tun.read(args.tmtu)
-                print "read from lan " + str(len(r)) + " bytes"
             else:
                 r = wan_tun.read(args.tmtu)
-                print "read from wan " + str(len(r)) + " bytes"
             
     exit (0)
 
