@@ -112,8 +112,10 @@ def main():
             if top.is_broadcast_ip(pkt[IP].dst) or lr_common.is_multicast_ip(pkt[IP].dst) or pkt[IP].src == gw or pkt[IP].dst == gw:
                 continue
 
-            if len(str(pkt)) > 1500:
-                pprint.pprint(pkt)
+            l = len(str(pkt))
+            if l > args.tmtu:
+                print "skipping packet of size " + str(l) + " which is bigger than mtu (" + str(args.tmtu) + ")"
+                continue
 
             #  TODO - handle case where source is the GW
 
@@ -139,14 +141,6 @@ def main():
     time.sleep(20)
 
     exit (0)
-
-    # print confirmed_lan
-    # print suspected_lan
-    # print wan
-    # print other
-    # print gw
-    # print subnet
-    # exit (0)
 
     
 
